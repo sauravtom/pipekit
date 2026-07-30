@@ -1,0 +1,72 @@
+# CPU-only profile: lower-cost development and fallback. GPU stays the default
+# production profile — plain `docker compose up -d` is unchanged.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
+#   # or: make up-cpu
+#
+# Expect seconds, not milliseconds, per turn. This profile is for wiring up a
+# client, exercising the protocol and CI — not for a usable conversation.
+#
+# `!reset` (which clears the GPU reservation inherited from the base file)
+# requires Docker Compose v2.24 or newer.
+services:
+  llm-engine:
+    # CPU build of the same server, rather than :server-cuda.
+    image: ghcr.io/ggml-org/llama.cpp:server
+    deploy: !reset null
+    command:
+      - -hf
+      # A ~1B model; the 4B default is unusably slow on CPU.
+      - ${CPU_LLM_MODEL:-ggml-org/gemma-3-1b-it-GGUF}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - -np
+      - "1"
+      - -c
+      - "${CPU_LLM_CTX:-4096}"
+      - -t
+      - "${CPU_LLM_THREADS:-4}"
+
+  pipekit-core:
+    # Built locally: upstream's Dockerfiles are all CUDA-based.
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+      args:
+        S2S_REF: ${S2S_REF:-cc37fe84fe08710e888ecc2eb5b468e41df74bca}
+    deploy: !reset null
+    command:
+      - speech-to-speech
+      - --mode
+      - realtime
+      - --ws_host
+      - 0.0.0.0
+      - --ws_port
+      - "8765"
+      - --num_pipelines
+      - "1"
+      # Overrides the device for every handler; without it the pipeline looks
+      # for CUDA and falls over on a GPU-less host.
+      - --device
+      - cpu
+      - --stt
+      - parakeet-tdt
+      - --tts
+      - qwen3
+      - --llm_backend
+      - chat-completions
+      - --model_name
+      - ${CPU_LLM_MODEL:-ggml-org/gemma-3-1b-it-GGUF}
+      - --responses_api_base_url
+      - http://llm-engine:8080/v1
+      - --responses_api_api_key
+      - ""
+      - --responses_api_stream
+      - --thresh
+      - "${VAD_THRESHOLD:-0.6}"
+      - --init_chat_role
+      - system
+      - --init_chat_prompt
+      - ${SYSTEM_PROMPT:-You are a helpful voice assistant. Keep replies short and conversational.}

@@ -151,6 +151,44 @@ This swaps `--mode realtime` for `--mode websocket` on the same port. Note that
 healthcheck to a TCP connect), and `make smoke` will report the missing pool endpoint
 before failing to complete a Realtime handshake — that is expected.
 
+## CPU profile (development / fallback)
+
+GPU is the default production profile — plain `docker compose up -d` is unchanged. When
+you just need the stack running without a GPU (wiring up a client, exercising the
+protocol, CI, or a machine whose GPU is busy):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
+# or: make up-cpu
+```
+
+**Expect seconds, not milliseconds, per turn.** This is for development and fallback,
+not a usable conversation. What the override changes:
+
+| | GPU (default) | CPU |
+|---|---|---|
+| pipeline image | upstream Dockerfile (CUDA) | `Dockerfile.cpu`, built here |
+| LLM image | `llama.cpp:server-cuda` | `llama.cpp:server` |
+| LLM model | `gemma-4-E4B-it-GGUF` | `gemma-3-1b-it-GGUF` (`CPU_LLM_MODEL`) |
+| context | 32768 | 4096 (`CPU_LLM_CTX`) |
+| device | CUDA | `--device cpu` |
+| GPU reservation | `device_ids: ['0']` | cleared via `deploy: !reset null` |
+
+Everything else — the Realtime endpoint, `/v1/pool`, `make smoke` — behaves identically,
+which is the point: the same client code works against both profiles.
+
+Two things worth knowing about the CPU image:
+
+- Upstream's Dockerfiles are all CUDA-based (`Dockerfile` and `Dockerfile.arm64` both
+  start `FROM nvidia/cuda`), so `Dockerfile.cpu` is PipeKit's own: slim Python base,
+  CPU-only torch from the PyTorch CPU index (the default wheels pull ~2.5 GB of unusable
+  CUDA libraries), and the `+cpu` build of the Qwen3-TTS ggml runtime — the only
+  `qwentts-cpp-python` wheels on PyPI are CUDA builds, so it comes from a Hub dataset,
+  selected per architecture via `TARGETARCH` (x86_64 and aarch64 both available).
+- `deploy: !reset null` needs **Docker Compose v2.24+**. On older versions the CPU
+  profile would inherit the GPU reservation and refuse to start; `make lint` asserts the
+  reservation is actually gone.
+
 ## Tuning
 
 Everything below lives in `.env`; see `.env.example` for the full list.
@@ -182,8 +220,10 @@ through a VPN or Tailscale. `llm-engine` is already bound to loopback so only
 ## Layout
 
 ```
-docker-compose.yml           llm-engine + pipekit-core, realtime mode
+docker-compose.yml           llm-engine + pipekit-core, realtime mode (GPU)
 docker-compose.raw-pcm.yml   override for raw PCM transport
+docker-compose.cpu.yml       override for the CPU dev/fallback profile
+Dockerfile.cpu               CPU-only pipeline image (upstream's are CUDA-only)
 .env.example                 all tunables
 Makefile                     up / down / logs / pool / usage / smoke
 scripts/bootstrap-ec2.sh     preflight (read-only unless --install-toolkit)

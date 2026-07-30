@@ -3,15 +3,18 @@
 #
 # Checks, in order:
 #   1. YAML style (yamllint, config in .yamllint.yml)
-#   2. Compose schema for the base file and the raw-PCM override
+#   2. Compose schema for the base file and each override combination
 #   3. No ${VAR} left without a default — an unset var must not silently
 #      interpolate to an empty string
 #   4. Every ${VAR} the compose files reference is documented in .env.example
+#   5. The GPU profile reserves an nvidia device and the CPU profile does not
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 BASE=docker-compose.yml
 RAW=docker-compose.raw-pcm.yml
+CPU=docker-compose.cpu.yml
+ALL=("${BASE}" "${RAW}" "${CPU}")
 fail=0
 
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -22,7 +25,7 @@ echo "Linting compose files"
 
 # --- 1. YAML style -----------------------------------------------------------
 if command -v yamllint >/dev/null 2>&1; then
-  if out=$(yamllint -f parsable -c .yamllint.yml "${BASE}" "${RAW}" 2>&1); then
+  if out=$(yamllint -f parsable -c .yamllint.yml "${ALL[@]}" 2>&1); then
     ok "yamllint clean"
   else
     bad "yamllint:"
@@ -38,7 +41,7 @@ if docker compose version >/dev/null 2>&1; then
   # checked; a developer's local .env cannot mask a broken default.
   empty_env=$(mktemp)
   trap 'rm -f "${empty_env}"' EXIT
-  for args in "-f ${BASE}" "-f ${BASE} -f ${RAW}"; do
+  for args in "-f ${BASE}" "-f ${BASE} -f ${RAW}" "-f ${BASE} -f ${CPU}"; do
     label="${args//-f /}"
     if out=$(docker compose --env-file "${empty_env}" ${args} config 2>&1 >/dev/null); then
       ok "compose config: ${label}"
@@ -53,12 +56,34 @@ if docker compose version >/dev/null 2>&1; then
       bad "no default for: $(printf '%s\n' "${unset_vars}" | grep -oE '"[^"]+"' | tr -d '"' | sort -u | paste -sd' ' -)"
     fi
   done
+
+  # --- 5. GPU is reserved by default, and the CPU profile clears it ---
+  # Guards the `deploy: !reset null` in the CPU override: if that stopped
+  # working, the CPU profile would demand a GPU and fail to start on the
+  # cheap host it exists to support.
+  gpu_cfg=$(docker compose --env-file "${empty_env}" -f "${BASE}" config 2>/dev/null)
+  cpu_cfg=$(docker compose --env-file "${empty_env}" -f "${BASE}" -f "${CPU}" config 2>/dev/null)
+  if printf '%s' "${gpu_cfg}" | grep -q 'driver: nvidia'; then
+    ok "default profile reserves an nvidia device"
+  else
+    bad "default profile no longer reserves a GPU"
+  fi
+  if printf '%s' "${cpu_cfg}" | grep -q 'driver: nvidia'; then
+    bad "CPU profile still reserves an nvidia device (deploy: !reset not applied)"
+  else
+    ok "CPU profile reserves no GPU"
+  fi
+  if printf '%s' "${cpu_cfg}" | grep -q 'llama.cpp:server-cuda'; then
+    bad "CPU profile still uses the CUDA llama.cpp image"
+  else
+    ok "CPU profile uses the CPU llama.cpp image"
+  fi
 else
-  skip "docker compose not available — schema check runs in CI"
+  skip "docker compose not available — schema and profile checks run in CI"
 fi
 
 # --- 4. .env.example coverage ------------------------------------------------
-referenced=$(grep -ohE '\$\{[A-Za-z_][A-Za-z0-9_]*' "${BASE}" "${RAW}" | cut -c3- | sort -u)
+referenced=$(grep -ohE '\$\{[A-Za-z_][A-Za-z0-9_]*' "${ALL[@]}" | cut -c3- | sort -u)
 documented=$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' .env.example | tr -d '=' | sort -u)
 if missing=$(comm -23 <(printf '%s\n' "${referenced}") <(printf '%s\n' "${documented}")) && [[ -n "${missing}" ]]; then
   bad "referenced in compose but absent from .env.example: $(printf '%s\n' "${missing}" | paste -sd' ' -)"

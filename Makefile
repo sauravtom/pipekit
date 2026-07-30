@@ -1,9 +1,10 @@
 COMPOSE ?= docker compose
 RAW := -f docker-compose.yml -f docker-compose.raw-pcm.yml
+CPU := -f docker-compose.yml -f docker-compose.cpu.yml
 HOST ?= localhost
 PORT ?= 8765
 
-.PHONY: help up up-raw down logs logs-llm ps pool usage smoke build preflight lint
+.PHONY: help up up-raw up-cpu down down-cpu logs logs-llm ps pool usage smoke build build-cpu preflight lint
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -14,17 +15,26 @@ lint: ## Lint the compose files (same checks as CI)
 preflight: ## Verify GPU, Docker and NVIDIA container runtime
 	./scripts/bootstrap-ec2.sh
 
-build: ## Build the pipeline image
+build: ## Build the pipeline image (GPU)
 	$(COMPOSE) build
 
-up: ## Start PipeKit (OpenAI Realtime protocol)
+build-cpu: ## Build the CPU image
+	$(COMPOSE) $(CPU) build
+
+up: ## Start PipeKit (GPU, OpenAI Realtime protocol)
 	$(COMPOSE) up -d
 
-up-raw: ## Start PipeKit (raw PCM websocket)
+up-raw: ## Start PipeKit (GPU, raw PCM websocket)
 	$(COMPOSE) $(RAW) up -d
+
+up-cpu: ## Start PipeKit (CPU dev/fallback profile — slow)
+	$(COMPOSE) $(CPU) up -d
 
 down: ## Stop everything
 	$(COMPOSE) down
+
+down-cpu: ## Stop the CPU profile
+	$(COMPOSE) $(CPU) down
 
 logs: ## Follow pipeline logs
 	$(COMPOSE) logs -f pipekit-core

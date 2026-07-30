@@ -300,6 +300,14 @@ client = AsyncOpenAI(base_url=<span class="k">"http://&lt;ec2-ip&gt;:8765/v1"</s
       <code>GET /v1/usage</code> for aggregate counters.
     </p>
 
+    <h3>No GPU? CPU profile</h3>
+    <p style="color:var(--muted);margin:0 0 16px">
+      GPU is the default production profile. An override runs the whole stack on CPU for
+      development, protocol work and CI — same endpoint, same client code, but
+      <strong style="color:var(--text)">seconds, not milliseconds</strong> per turn.
+    </p>
+    <pre>docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d</pre>
+
     <h3>Leaner transport: raw PCM</h3>
     <p style="color:var(--muted);margin:0 0 16px">
       Skip the protocol entirely — no JSON envelope, no interruption events, no live transcripts.
