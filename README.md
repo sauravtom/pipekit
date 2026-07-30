@@ -188,8 +188,15 @@ docker-compose.raw-pcm.yml   override for raw PCM transport
 Makefile                     up / down / logs / pool / usage / smoke
 scripts/bootstrap-ec2.sh     preflight (read-only unless --install-toolkit)
 scripts/smoke_test.py        realtime client: session check + full-turn latency
+scripts/lint-compose.sh      compose lint, also run by CI
 cache/                       HF + GGUF cache, shared by both containers (gitignored)
 ```
+
+`make lint` runs the same checks as the `lint` workflow: yamllint (config in
+`.yamllint.yml`), `docker compose config` for both the base file and the raw-PCM
+override, a guard that every `${VAR}` has a default so a missing env var cannot
+silently become an empty string, and a check that `.env.example` documents every
+variable the compose files reference.
 
 ## Notes on the build
 

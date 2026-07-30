@@ -3,10 +3,13 @@ RAW := -f docker-compose.yml -f docker-compose.raw-pcm.yml
 HOST ?= localhost
 PORT ?= 8765
 
-.PHONY: help up up-raw down logs logs-llm ps pool usage smoke build preflight
+.PHONY: help up up-raw down logs logs-llm ps pool usage smoke build preflight lint
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+
+lint: ## Lint the compose files (same checks as CI)
+	./scripts/lint-compose.sh
 
 preflight: ## Verify GPU, Docker and NVIDIA container runtime
 	./scripts/bootstrap-ec2.sh
