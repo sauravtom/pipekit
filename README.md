@@ -240,6 +240,13 @@ override, a guard that every `${VAR}` has a default so a missing env var cannot
 silently become an empty string, and a check that `.env.example` documents every
 variable the compose files reference.
 
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE). PipeKit is deployment tooling; the pipeline it
+wraps ([huggingface/speech-to-speech](https://github.com/huggingface/speech-to-speech))
+is separately Apache-2.0, and the models you point it at carry their own licenses —
+Gemma, Parakeet TDT and Qwen3-TTS each have terms worth reading before commercial use.
+
 ## Notes on the build
 
 - `pipekit-core` builds directly from the upstream git context, pinned to a commit
