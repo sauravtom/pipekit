@@ -1,0 +1,6 @@
+.env
+cache/
+*.wav
+!scripts/fixtures/*.wav
+__pycache__/
+.venv/

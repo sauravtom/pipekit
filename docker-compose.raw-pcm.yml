@@ -1,0 +1,47 @@
+# Leaner transport: raw PCM over a bare websocket instead of the OpenAI
+# Realtime protocol. You stream 16 kHz int16 mono PCM in and get PCM out —
+# no JSON events, so no interruption handling or live transcripts.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.raw-pcm.yml up -d
+#
+services:
+  pipekit-core:
+    command:
+      - speech-to-speech
+      - --mode
+      - websocket
+      - --ws_host
+      - 0.0.0.0
+      - --ws_port
+      - "8765"
+      - --stt
+      - parakeet-tdt
+      - --tts
+      - qwen3
+      - --llm_backend
+      - chat-completions
+      - --model_name
+      - ${LLM_MODEL:-ggml-org/gemma-4-E4B-it-GGUF}
+      - --responses_api_base_url
+      - http://llm-engine:8080/v1
+      - --responses_api_api_key
+      - ""
+      - --responses_api_stream
+      - --thresh
+      - "${VAD_THRESHOLD:-0.6}"
+      - --init_chat_role
+      - system
+      - --init_chat_prompt
+      - ${SYSTEM_PROMPT:-You are a helpful voice assistant. Keep replies short and conversational.}
+    # websocket mode serves no HTTP routes, so /v1/pool is gone — fall back to
+    # checking that the listener accepts TCP connections.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; socket.create_connection(('127.0.0.1', 8765), timeout=5).close()
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15m

@@ -1,0 +1,107 @@
+name: pipekit
+
+# Both services share GPU 0. The pipeline (Parakeet STT + Qwen3-TTS) and the
+# LLM sit in the same VRAM budget, so tune LLM_CTX / LLM_PARALLEL in .env if
+# you are on a 16 GB card. See README "Sizing the GPU".
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            device_ids: ['0']
+            capabilities: [gpu]
+
+services:
+  # ---------------------------------------------------------------------------
+  # LLM backend. llama.cpp pulls the GGUF straight from the Hub on first boot
+  # and caches it in ./cache, so there is no manual model download step.
+  # ---------------------------------------------------------------------------
+  llm-engine:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    restart: unless-stopped
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ./cache:/root/.cache
+    # Bound to loopback: only pipekit-core needs this, it is not a public API.
+    ports:
+      - "127.0.0.1:${LLM_HOST_PORT:-8080}:8080"
+    command:
+      - -hf
+      - ${LLM_MODEL:-ggml-org/gemma-4-E4B-it-GGUF}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - -np
+      - "${LLM_PARALLEL:-2}"
+      - -c
+      - "${LLM_CTX:-32768}"
+      - -fa
+      - "on"
+      - --swa-full
+    <<: *gpu
+
+  # ---------------------------------------------------------------------------
+  # PipeKit voice service: VAD -> STT -> LLM -> TTS, exposed over the OpenAI
+  # Realtime protocol at ws://<host>:8765/v1/realtime
+  # ---------------------------------------------------------------------------
+  pipekit-core:
+    build:
+      context: https://github.com/huggingface/speech-to-speech.git#${S2S_REF:-cc37fe84fe08710e888ecc2eb5b468e41df74bca}
+    restart: unless-stopped
+    depends_on:
+      - llm-engine
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ./cache:/root/.cache
+    shm_size: 2gb
+    ports:
+      - "${PIPEKIT_HOST_PORT:-8765}:8765"
+    command:
+      - speech-to-speech
+      - --mode
+      - realtime
+      - --ws_host
+      - 0.0.0.0
+      - --ws_port
+      - "8765"
+      # Max concurrent sessions. Each pipeline holds its own STT/TTS weights,
+      # so raise this only with VRAM headroom to spare.
+      - --num_pipelines
+      - "${NUM_PIPELINES:-1}"
+      - --stt
+      - parakeet-tdt
+      - --tts
+      - qwen3
+      - --llm_backend
+      - chat-completions
+      - --model_name
+      - ${LLM_MODEL:-ggml-org/gemma-4-E4B-it-GGUF}
+      - --responses_api_base_url
+      - http://llm-engine:8080/v1
+      - --responses_api_api_key
+      - ""
+      - --responses_api_stream
+      - --thresh
+      - "${VAD_THRESHOLD:-0.6}"
+      - --init_chat_role
+      - system
+      - --init_chat_prompt
+      - ${SYSTEM_PROMPT:-You are a helpful voice assistant. Keep replies short and conversational.}
+    # /v1/pool is served on the same port as the websocket. start_period is
+    # generous because the first boot downloads STT + TTS weights from the Hub.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/v1/pool', timeout=5)
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15m
+    <<: *gpu
