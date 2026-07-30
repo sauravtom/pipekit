@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PipeKit — self-hosted OpenAI Realtime-compatible voice stack</title>
+<meta name="description" content="Headless voice infrastructure: VAD to STT to LLM to TTS, all running locally on one GPU, behind an OpenAI Realtime-compatible WebSocket. One docker compose up.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0d10'/%3E%3Cg fill='none' stroke='%2364d2a3' stroke-width='2.6' stroke-linecap='round'%3E%3Cpath d='M7 16h3'/%3E%3Cpath d='M13 10v12'/%3E%3Cpath d='M19 7v18'/%3E%3Cpath d='M25 12v8'/%3E%3C/g%3E%3C/svg%3E">
+<meta property="og:title" content="PipeKit">
+<meta property="og:description" content="Self-hosted, OpenAI Realtime-compatible voice stack. VAD to STT to LLM to TTS, all local on one GPU.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://sauravtom.github.io/pipekit/">
+<style>
+  :root {
+    --bg: #0b0d10;
+    --surface: #12161b;
+    --surface-2: #171c22;
+    --border: #262d36;
+    --text: #e6ebf1;
+    --muted: #9aa7b5;
+    --accent: #64d2a3;
+    --accent-dim: #2f8f6d;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #ffffff;
+      --surface: #f6f8fa;
+      --surface-2: #eef1f5;
+      --border: #d5dbe2;
+      --text: #131820;
+      --muted: #566270;
+      --accent: #0f7a55;
+      --accent-dim: #0f7a55;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+  header { padding: 88px 0 56px; border-bottom: 1px solid var(--border); }
+  .eyebrow {
+    font: 600 12px/1 var(--mono);
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 20px;
+  }
+  h1 { font-size: clamp(2.4rem, 7vw, 3.6rem); line-height: 1.05; margin: 0 0 20px; letter-spacing: -.03em; }
+  .lede { font-size: clamp(1.05rem, 2.6vw, 1.25rem); color: var(--muted); margin: 0 0 32px; max-width: 62ch; }
+  .lede strong { color: var(--text); font-weight: 600; }
+
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn {
+    display: inline-block;
+    padding: 11px 20px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: .95rem;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+  }
+  .btn:hover { text-decoration: none; border-color: var(--accent-dim); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #06120d; }
+  @media (prefers-color-scheme: light) { .btn-primary { color: #fff; } }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .badges { margin-top: 28px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .badges img { height: 20px; }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--border); }
+  h2 { font-size: 1.4rem; margin: 0 0 8px; letter-spacing: -.015em; }
+  h2 + .sub { color: var(--muted); margin: 0 0 28px; }
+  h3 { font-size: 1rem; margin: 32px 0 10px; }
+
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    font: 13.5px/1.7 var(--mono);
+    margin: 0;
+  }
+  code { font-family: var(--mono); font-size: .92em; }
+  :not(pre) > code {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: .12em .4em;
+  }
+  .c { color: var(--muted); }
+  .k { color: var(--accent); }
+
+  .snippet { position: relative; }
+  .copy {
+    position: absolute; top: 10px; right: 10px;
+    font: 600 11px/1 var(--mono);
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    cursor: pointer;
+  }
+  .copy:hover { color: var(--text); border-color: var(--accent-dim); }
+
+  /* Tight leading so the box-drawing verticals join up instead of dashing. */
+  .diagram { font: 12.5px/1.15 var(--mono); color: var(--muted); }
+  .diagram b { color: var(--text); font-weight: 600; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .93rem; }
+  th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: .75rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  tbody tr:last-child td { border-bottom: none; }
+  td code { white-space: nowrap; }
+  .tbl { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .scroll { overflow-x: auto; }
+
+  ul { padding-left: 20px; margin: 0 0 16px; }
+  li { margin: 7px 0; }
+  li::marker { color: var(--accent-dim); }
+
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 10px 10px 0;
+    padding: 16px 20px;
+    margin: 24px 0 0;
+  }
+  .note p { margin: 0; }
+  .note strong { color: var(--text); }
+
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; }
+  .card h3 { margin: 0 0 6px; font-size: .95rem; }
+  .card p { margin: 0; color: var(--muted); font-size: .9rem; }
+
+  footer { padding: 48px 0 72px; color: var(--muted); font-size: .9rem; }
+  footer p { margin: 0 0 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="eyebrow">Self-hosted voice infrastructure</p>
+    <h1>PipeKit</h1>
+    <p class="lede">
+      A low-latency <strong>VAD&nbsp;→&nbsp;STT&nbsp;→&nbsp;LLM&nbsp;→&nbsp;TTS</strong> pipeline behind an
+      <strong>OpenAI Realtime-compatible WebSocket</strong> — every model running locally on your own GPU.
+      No provider APIs, no per-minute billing, no audio leaving your VPC. One <code>docker compose up</code>.
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/sauravtom/pipekit">View on GitHub</a>
+      <a class="btn" href="#quickstart">Quickstart</a>
+    </div>
+    <div class="badges">
+      <a href="https://github.com/sauravtom/pipekit/actions/workflows/lint.yml">
+        <img src="https://github.com/sauravtom/pipekit/actions/workflows/lint.yml/badge.svg" alt="lint workflow status">
+      </a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>What it is</h2>
+    <p class="sub">
+      A deployment wrapper around
+      <a href="https://github.com/huggingface/speech-to-speech">huggingface/speech-to-speech</a>.
+      The pipeline logic lives upstream; PipeKit owns the compose topology, GPU sizing, operational
+      scripts and a pinned upstream commit so redeploys are reproducible.
+    </p>
+    <div class="scroll">
+      <pre class="diagram">                    ┌──────────────────────────────────────────┐
+  client ──ws──▶    │ <b>pipekit-core</b>                             │
+  (OpenAI Realtime) │  Silero VAD → Parakeet TDT → LLM → Qwen3 │
+                    └───────────────────┬──────────────────────┘
+                                        │ http (OpenAI-compatible)
+                    ┌───────────────────▼──────────────────────┐
+                    │ <b>llm-engine</b> — llama.cpp server-cuda       │
+                    └──────────────────────────────────────────┘
+                              both share GPU 0</pre>
+    </div>
+
+    <div class="grid" style="margin-top:32px">
+      <div class="card">
+        <h3>Drop-in protocol</h3>
+        <p>Standard OpenAI Realtime client SDKs work — just repoint the base URL. No custom socket code.</p>
+      </div>
+      <div class="card">
+        <h3>Fully local</h3>
+        <p>STT, LLM and TTS weights all sit on your GPU. Audio never leaves the instance.</p>
+      </div>
+      <div class="card">
+        <h3>Barge-in included</h3>
+        <p>VAD-driven interruption cancels the in-flight response mid-sentence, as the protocol expects.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Stack</h2>
+    <p class="sub">Every stage is a flag away from being swapped.</p>
+    <div class="tbl scroll">
+      <table>
+        <thead><tr><th>Stage</th><th>Component</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>VAD</td><td>Silero VAD v5</td><td>turn-taking and speech boundaries</td></tr>
+          <tr><td>STT</td><td><code>--stt parakeet-tdt</code></td><td>fast streaming partial transcripts</td></tr>
+          <tr><td>LLM</td><td>any GGUF via llama.cpp</td><td>local, OpenAI-compatible endpoint</td></tr>
+          <tr><td>TTS</td><td><code>--tts qwen3</code></td><td>streams synthesized chunks as they generate</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="wrap">
+    <h2>Quickstart</h2>
+    <p class="sub">
+      Launch a GPU instance from the <strong>Ubuntu Deep Learning AMI</strong> — it ships the NVIDIA driver,
+      CUDA runtime and container toolkit already configured. Give it ~60&nbsp;GB of EBS.
+    </p>
+    <div class="snippet">
+      <button class="copy" data-copy="quickstart" type="button">Copy</button>
+      <pre id="quickstart-code">git clone https://github.com/sauravtom/pipekit &amp;&amp; cd pipekit
+cp .env.example .env    <span class="c"># set HF_TOKEN</span>
+./scripts/bootstrap-ec2.sh
+docker compose up -d</pre>
+    </div>
+    <p style="color:var(--muted);margin:20px 0 0">
+      <code>bootstrap-ec2.sh</code> is read-only by default: it checks driver, VRAM tier, Docker, Compose v2,
+      GPU passthrough and disk. First boot downloads the GGUF plus STT/TTS weights into <code>./cache/</code> —
+      expect 10–20 minutes. Then watch for:
+    </p>
+    <pre style="margin-top:16px">OpenAI Realtime API starting on ws://0.0.0.0:8765/v1/realtime (pool size 1)</pre>
+
+    <h3>Verify it</h3>
+    <pre>pip install websockets
+make smoke HOST=&lt;ec2-ip&gt;                     <span class="c"># session opens?</span>
+make smoke HOST=&lt;ec2-ip&gt; AUDIO=hello.wav     <span class="c"># full turn + time-to-first-audio</span></pre>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Sizing the GPU</h2>
+    <p class="sub">STT, LLM and TTS weights co-reside, so VRAM is the binding constraint.</p>
+    <div class="tbl scroll">
+      <table>
+        <thead><tr><th>Instance</th><th>GPU</th><th>VRAM</th><th>Settings</th></tr></thead>
+        <tbody>
+          <tr><td><code>g5.xlarge</code></td><td>A10G</td><td>24 GB</td><td>defaults as shipped (<code>LLM_CTX=32768</code>)</td></tr>
+          <tr><td><code>g4dn.xlarge</code></td><td>T4</td><td>16 GB</td><td><code>LLM_CTX=8192</code>, <code>NUM_PIPELINES=1</code>, consider dropping <code>--swa-full</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="color:var(--muted);margin:20px 0 0">
+      <code>NUM_PIPELINES</code> caps concurrent sessions; each pipeline holds its own STT/TTS handlers.
+      Connections beyond the pool size are rejected with <code>session_limit_reached</code> rather than queued.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Consuming the API</h2>
+    <p class="sub"><code>ws://&lt;host&gt;:8765/v1/realtime</code> speaks the OpenAI Realtime protocol.</p>
+    <pre><span class="k">from</span> openai <span class="k">import</span> AsyncOpenAI
+
+client = AsyncOpenAI(base_url=<span class="k">"http://&lt;ec2-ip&gt;:8765/v1"</span>, api_key=<span class="k">"unused"</span>)
+
+<span class="k">async with</span> client.realtime.connect(model=<span class="k">"local"</span>) <span class="k">as</span> conn:
+    <span class="k">await</span> conn.input_audio_buffer.append(audio=b64_pcm16)   <span class="c"># 16 kHz mono</span>
+    <span class="k">async for</span> event <span class="k">in</span> conn:
+        <span class="k">if</span> event.type == <span class="k">"response.output_audio.delta"</span>:
+            play(event.delta)</pre>
+    <p style="color:var(--muted);margin:20px 0 0">
+      Audio in and out is PCM16 at <strong style="color:var(--text)">16 kHz</strong> by default — the pipeline's
+      native rate. The server resamples if you declare another rate via <code>session.update</code>.
+      Operational endpoints ride the same port: <code>GET /v1/pool</code> for per-unit occupancy,
+      <code>GET /v1/usage</code> for aggregate counters.
+    </p>
+
+    <h3>Leaner transport: raw PCM</h3>
+    <p style="color:var(--muted);margin:0 0 16px">
+      Skip the protocol entirely — no JSON envelope, no interruption events, no live transcripts.
+      Stream 16 kHz int16 mono PCM in, get audio bytes out.
+    </p>
+    <pre>docker compose -f docker-compose.yml -f docker-compose.raw-pcm.yml up -d</pre>
+
+    <div class="note">
+      <p>
+        <strong>No authentication.</strong> Anyone who can reach port 8765 can use your GPU. Don't put it on
+        <code>0.0.0.0</code> in a public subnet — restrict the security group to known CIDRs, front it with an
+        ALB or nginx terminating TLS and checking a bearer token, or keep the port private behind a VPN.
+      </p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>
+      <a href="https://github.com/sauravtom/pipekit">github.com/sauravtom/pipekit</a>
+      · built on <a href="https://github.com/huggingface/speech-to-speech">huggingface/speech-to-speech</a> (Apache-2.0)
+      · <a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a>
+    </p>
+    <p>Full deployment, tuning and security notes live in the repository README.</p>
+  </div>
+</footer>
+
+<script>
+  document.querySelectorAll('.copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pre = document.getElementById(btn.dataset.copy + '-code');
+      if (!pre || !navigator.clipboard) return;
+      navigator.clipboard.writeText(pre.innerText.trim()).then(function () {
+        var prev = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(function () { btn.textContent = prev; }, 1600);
+      });
+    });
+  });
+</script>
+
+</body>
+</html>

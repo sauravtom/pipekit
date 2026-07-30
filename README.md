@@ -16,7 +16,7 @@ sizing, the operational scripts, and the pinned version.
                     └───────────────────┬──────────────────────┘
                                         │ http (OpenAI-compatible)
                     ┌───────────────────▼──────────────────────┐
-                    │ llm-engine — llama.cpp server-cuda        │
+                    │ llm-engine — llama.cpp server-cuda       │
                     └──────────────────────────────────────────┘
                               both share GPU 0
 ```
