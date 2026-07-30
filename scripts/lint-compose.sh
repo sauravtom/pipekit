@@ -59,25 +59,48 @@ if docker compose version >/dev/null 2>&1; then
 
   # --- 5. GPU is reserved by default, and the CPU profile clears it ---
   # Guards the `deploy: !reset null` in the CPU override: if that stopped
-  # working, the CPU profile would demand a GPU and fail to start on the
-  # cheap host it exists to support.
-  gpu_cfg=$(docker compose --env-file "${empty_env}" -f "${BASE}" config 2>/dev/null)
-  cpu_cfg=$(docker compose --env-file "${empty_env}" -f "${BASE}" -f "${CPU}" config 2>/dev/null)
-  if printf '%s' "${gpu_cfg}" | grep -q 'driver: nvidia'; then
-    ok "default profile reserves an nvidia device"
+  # working, the CPU profile would demand a GPU and fail to start on the cheap
+  # host it exists to support. Note `devices: []` does NOT clear an inherited
+  # reservation (verified against Compose v2.38) — only the !reset/!override
+  # tags do, which is why the override uses one.
+  #
+  # This inspects the parsed service tree, not the rendered text: `config`
+  # echoes top-level x- extension fields verbatim, so the x-gpu anchor in the
+  # base file makes a naive `grep nvidia` match under every profile.
+  profile_gpu() {
+    docker compose --env-file "${empty_env}" "$@" config --format json 2>/dev/null \
+      | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+for name, svc in sorted(doc.get("services", {}).items()):
+    resources = (svc.get("deploy") or {}).get("resources") or {}
+    devices = (resources.get("reservations") or {}).get("devices") or []
+    drivers = sorted({str(d.get("driver", "?")) for d in devices})
+    print(name, ",".join(drivers) or "none")
+'
+  }
+
+  gpu_devs=$(profile_gpu -f "${BASE}")
+  cpu_devs=$(profile_gpu -f "${BASE}" -f "${CPU}")
+
+  if printf '%s\n' "${gpu_devs}" | grep -q 'nvidia'; then
+    ok "default profile reserves an nvidia device ($(printf '%s' "${gpu_devs}" | tr '\n' ' '))"
   else
-    bad "default profile no longer reserves a GPU"
+    bad "default profile no longer reserves a GPU: ${gpu_devs}"
   fi
-  if printf '%s' "${cpu_cfg}" | grep -q 'driver: nvidia'; then
-    bad "CPU profile still reserves an nvidia device (deploy: !reset not applied)"
+  if printf '%s\n' "${cpu_devs}" | grep -q 'nvidia'; then
+    bad "CPU profile still reserves a GPU: $(printf '%s' "${cpu_devs}" | tr '\n' ' ')"
   else
     ok "CPU profile reserves no GPU"
   fi
-  if printf '%s' "${cpu_cfg}" | grep -q 'llama.cpp:server-cuda'; then
-    bad "CPU profile still uses the CUDA llama.cpp image"
-  else
-    ok "CPU profile uses the CPU llama.cpp image"
-  fi
+
+  cpu_image=$(docker compose --env-file "${empty_env}" -f "${BASE}" -f "${CPU}" config --format json 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["llm-engine"]["image"])')
+  case "${cpu_image}" in
+    *server-cuda) bad "CPU profile still uses the CUDA llama.cpp image: ${cpu_image}" ;;
+    *llama.cpp:server) ok "CPU profile uses the CPU llama.cpp image" ;;
+    *) bad "unexpected CPU profile LLM image: ${cpu_image}" ;;
+  esac
 else
   skip "docker compose not available — schema and profile checks run in CI"
 fi

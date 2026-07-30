@@ -187,7 +187,9 @@ Two things worth knowing about the CPU image:
   selected per architecture via `TARGETARCH` (x86_64 and aarch64 both available).
 - `deploy: !reset null` needs **Docker Compose v2.24+**. On older versions the CPU
   profile would inherit the GPU reservation and refuse to start; `make lint` asserts the
-  reservation is actually gone.
+  reservation is actually gone. A plain `devices: []` is *not* a substitute — verified
+  against v2.38, it leaves the inherited reservation in place silently, which is why the
+  override uses the `!reset` tag.
 
 ## Tuning
 
